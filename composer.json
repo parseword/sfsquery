@@ -1,0 +1,28 @@
+{
+    "name": "parseword/sfsquery",
+    "type": "library",
+    "description": "A PHP class to query the StopForumSpam API",
+    "keywords": ["stopforumspam","php"],
+    "homepage": "https://github.com/parseword/sfsquery/",
+    "readme": "https://github.com/parseword/sfsquery/blob/master/README.md",
+    "license": "Apache-2.0",
+    "authors": [
+        {
+            "name": "Shaun Cummiskey",
+            "email": "shaun@shaunc.com",
+            "homepage": "https://shaunc.com",
+            "role": "Developer"
+        }
+    ],
+    "support": {
+        "docs": "https://github.com/parseword/sfsquery/"
+    },
+    "require": {
+        "php": ">=7.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "parseword\\SFSQuery\\": "src"
+        }
+    }
+}

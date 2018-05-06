@@ -19,7 +19,10 @@
  * limitations under the License.
  */
 
-//This standalone script isn't using an autoloader
+//There may not be an autoloader available for this standalone example script
+if (file_exists('vendor/autoload.php')) {
+    @include 'vendor/autoload.php';
+}
 if (!class_exists('parseword\SFSQuery\SFSQuery')) {
     require_once 'src/SFSQuery.php';
 }

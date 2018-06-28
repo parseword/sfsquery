@@ -3,8 +3,12 @@
 /*
  * SFSQuery: A PHP client to query the StopForumSpam API
  *
- * Copyright 2018 Shaun Cummiskey, <shaun@shaunc.com> <https://shaunc.com>
+ * Copyright 2018 Shaun Cummiskey, <shaun@shaunc.com> <https://shaunc.com/>
  * <https://github.com/parseword/sfsquery/>
+ *
+ * The author is not affiliated with the StopForumSpam project. Any use of
+ * their service must comply with their Acceptable Use Policy, located at
+ * <https://www.stopforumspam.com/legal>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,11 +25,12 @@
 
 namespace parseword\SFSQuery;
 
-//TCP connect timeout (in seconds) to use
+//TCP connect timeout (in seconds) to use. Applies to web API only.
 define('SFS_NET_TIMEOUT', 3);
 
 //User-Agent string to present to the StopForumSpam API
-define('SFS_USER_AGENT', 'SFSQuery/4 (+https://github.com/parseword/)');
+define('SFS_USER_AGENT',
+        'SFSQuery/1.1.0 (+https://github.com/parseword/sfsquery/)');
 
 //Components of the API URI. You should leave this alone unless you need to
 //connect to a specific regional server.
@@ -42,6 +47,7 @@ class SFSQuery
     private $appears = false;
     private $confidence = 0.00;
     private $country = null;
+    private $dnsResponse = null;
     private $frequency = 0;
     private $lastSeen = 0;
     private $asn = 0;
@@ -53,6 +59,7 @@ class SFSQuery
      * @param string $ip
      */
     public function __construct(string $ip) {
+        //Set the target IP address
         $this->ip = $ip;
     }
 
@@ -69,24 +76,29 @@ class SFSQuery
      * Test whether or not the target IP address is valid. Private (RFC1918) and
      * various reserved IPs (broadcast, multicast, etc.) will return false.
      *
+     * @param bool $allowIpv6 Whether or not an IPv6 address will be considered valid
+     *
      * @return bool
      */
-    private function ipIsValid(): bool {
-        return filter_var($this->getIp(), FILTER_VALIDATE_IP,
-                FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE);
+    private function ipIsValid(bool $allowIpv6 = true): bool {
+        $flags = FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE;
+        if (!$allowIpv6) {
+            $flags |= FILTER_FLAG_IPV4;
+        }
+        return filter_var($this->getIp(), FILTER_VALIDATE_IP, $flags);
     }
 
     /**
      * Return the raw response received from the StopForumSpam API server.
-     * In the case of a successful query, this will contain JSON. If a query
-     * fails, this will return null; call getError() to see why.
+     *
+     * In the case of a successful API query, this will contain JSON. If a query
+     * fails, this will return null; call getError() to see why. If DNSBL mode
+     * is being used, this will return null; use getDnsResponse() instead.
      *
      * @return string or null
      */
     public function getApiResponse() {
-        if (!$this->queried) {
-            $this->apiQuery();
-        }
+        $this->query();
         return $this->apiResponse;
     }
 
@@ -107,9 +119,7 @@ class SFSQuery
      * @return bool
      */
     public function getAppears(): bool {
-        if (!$this->queried) {
-            $this->apiQuery();
-        }
+        $this->query();
         return $this->appears;
     }
 
@@ -128,9 +138,7 @@ class SFSQuery
      * @return int
      */
     public function getAsn(): int {
-        if (!$this->queried) {
-            $this->apiQuery();
-        }
+        $this->query();
         return $this->asn;
     }
 
@@ -151,9 +159,7 @@ class SFSQuery
      * @return float
      */
     public function getConfidence(): float {
-        if (!$this->queried) {
-            $this->apiQuery();
-        }
+        $this->query();
         return $this->confidence;
     }
 
@@ -174,9 +180,7 @@ class SFSQuery
      * @return string or null
      */
     public function getCountry() {
-        if (!$this->queried) {
-            $this->apiQuery();
-        }
+        $this->query();
         return $this->country;
     }
 
@@ -187,6 +191,36 @@ class SFSQuery
      */
     private function setCountry(string $country) {
         $this->country = $country;
+    }
+
+    /**
+     * Return the response received from the StopForumSpam DNSBL server. This
+     * method should not be called unless SFS_QUERY_METHOD is set to 'DNS'.
+     *
+     * If the IP being tested is listed in the StopForumSpam database, this will
+     * return an IP address in the format documented at:
+     * <https://www.stopforumspam.com/forum/viewtopic.php?id=7923>
+     *
+     * If the IP being tested is not listed in the StopForumSpam database, this
+     * will return the string literal 'NXDOMAIN'
+     *
+     * If a DNS query fails, this will return null; calling getError() may
+     * provide further details.
+     *
+     * @return string or null
+     */
+    public function getDnsResponse() {
+        $this->query();
+        return $this->dnsResponse;
+    }
+
+    /**
+     * Set the dnsResponse property.
+     *
+     * @param string $dnsResponse
+     */
+    private function setDnsResponse(string $dnsResponse) {
+        $this->dnsResponse = $dnsResponse;
     }
 
     /**
@@ -215,9 +249,7 @@ class SFSQuery
      * @return int
      */
     public function getFrequency(): int {
-        if (!$this->queried) {
-            $this->apiQuery();
-        }
+        $this->query();
         return $this->frequency;
     }
 
@@ -240,9 +272,7 @@ class SFSQuery
      * @return int
      */
     public function getLastSeen(): int {
-        if (!$this->queried) {
-            $this->apiQuery();
-        }
+        $this->query();
         return $this->lastSeen;
     }
 
@@ -255,9 +285,35 @@ class SFSQuery
         $this->lastSeen = $lastSeen;
     }
 
+    /*
+     * A wrapper to determine whether we want to query the web API or the
+     * DNSBL, and then perform the appropriate query. If this instance has
+     * already performed a query, returns true without querying again.
+     *
+     * @return bool The return value of apiQuery() or dnsQuery(), or true
+     * if this object has already run a query.
+     */
+
+    private function query(): bool {
+
+        //To avoid spurious traffic, bail if we've already made a request
+        if ($this->queried) {
+            return true;
+        }
+
+        //SFSQuery uses the web API by default. To query the DNSBL instead,
+        //define a constant named SFS_QUERY_METHOD as the string literal 'DNS'.
+        if (defined('SFS_QUERY_METHOD') && SFS_QUERY_METHOD == 'DNS') {
+            return $this->dnsQuery();
+        }
+        else {
+            return $this->apiQuery();
+        }
+    }
+
     /**
      * Query the StopForumSpam API server for information about the target IP.
-     * For portability, three different request methods are available: fopen
+     * For portability, three different request methods are available: fopen()
      * wrappers, curl, and sockets.
      *
      * If the query is successful, the various object properties are populated,
@@ -265,16 +321,13 @@ class SFSQuery
      * something fails, getApiResponse() will return null and getError() will
      * explain what happened.
      *
-     * Returns true on success, false on failure.
+     * Returns true if the query completed successfully, false if it did not.
+     * (A return value of true does *not* indicate the target IP is listed at
+     * StopForumSpam, it just means the API query succeeded.)
      *
      * @return bool
      */
     public function apiQuery(): bool {
-
-        //To avoid spurious traffic, bail if we've already sent a request
-        if ($this->queried) {
-            return true;
-        }
 
         //Don't query for unsupported IP addresses
         if (!$this->ipIsValid()) {
@@ -374,6 +427,66 @@ class SFSQuery
 
         if (!empty($answer['ip']['asn']) && is_numeric($answer['ip']['asn'])) {
             $this->setAsn($answer['ip']['asn']);
+        }
+
+        return true;
+    }
+
+    /**
+     * Query the StopForumSpam DNS server for information about the target IP.
+     *
+     * If the query is successful, the various object properties are populated,
+     * excluding $asn and $country, which aren't supplied by the DNSBL system.
+     * If something fails, getDnsResponse() will return null and getError() will
+     * explain what happened.
+     *
+     * Returns true if the query completed successfully, false if it did not.
+     * (A return value of true does *not* indicate the target IP is listed at
+     * StopForumSpam, it just means the DNS query succeeded.)
+     *
+     * @return bool
+     */
+    public function dnsQuery() {
+
+        //Don't query for unsupported IP addresses; this includes IPv6 for now
+        if (!$this->ipIsValid($allowIpv6 = false)) {
+            $this->setError('Private, reserved, or invalid IP address (IPv6 not supported)');
+            return false;
+        }
+
+        //Build the hostname we want to look up
+        $host = join('.', array_reverse(explode('.', $this->getIp()))) . '.i.rbl.stopforumspam.org';
+
+        //Query for the A record
+        $resolved = @gethostbyname($host);
+
+        //Flag that we've been here
+        $this->queried = true;
+
+        //If the host didn't resolve to an IP, gethostbyname() returns what we gave it
+        if ($host == $resolved) {
+            $this->setDnsResponse('NXDOMAIN');
+            return true;
+        }
+        $this->setDnsResponse($resolved);
+
+        //Parse the response and populate some variables. The DNSBL service
+        //only returns four data points about a listed IP, as documented at
+        //<https://www.stopforumspam.com/forum/viewtopic.php?id=7923>
+        $data = explode('.', $resolved);
+
+        if ($data['0'] == '127') {
+            //First octet set to 127 means the target IP is listed at StopForumSpam
+            $this->setAppears(true);
+
+            //Second octet is the frequency, capped at 255
+            $this->setFrequency($data['1']);
+
+            //Third octet is the number of days since the last report
+            $this->setLastSeen(time() - (86400 * $data['2']));
+
+            //Fourth octet is the spammer confidence level
+            $this->setConfidence($data['3']);
         }
 
         return true;

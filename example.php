@@ -3,7 +3,7 @@
 /*
  * SFSQuery: A PHP client to query the StopForumSpam API
  *
- * Copyright 2018 Shaun Cummiskey, <shaun@shaunc.com> <https://shaunc.com/>
+ * Copyright 2018, 2019 Shaun Cummiskey <shaun@shaunc.com> <https://shaunc.com/>
  * <https://github.com/parseword/sfsquery/>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -65,17 +65,20 @@ else {
 }
 
 /*
- * Version 1.1.0 introduces the ability to query via StopForumSpam's DNSBL
- * instead of the web API. To enable this option, you must define a constant
- * named SFS_QUERY_METHOD as the string literal 'DNS'.
+ * SFSQuery has the ability to query via StopForumSpam's DNSBL instead of the
+ * web API. To enable this option, you must instantiate an object and call
+ * setQueryMethod(SFSQuery::QUERYMETHOD_DNS)
  *
  * Here, querying the DNSBL is demonstrated. Note that the DNSBL doesn't return
  * the ASN or country name for an IP, so those methods will return 0 and null,
  * respectively.
  */
-define('SFS_QUERY_METHOD', 'DNS'); // <-- This enables DNSBL mode
 
 $sfs = new SFSQuery("188.35.167.7");
+
+//This enables DNS query mode
+$sfs->setQueryMethod(SFSQuery::QUERYMETHOD_DNS);
+
 //Demonstrate accessing the StopForumSpam DNSBL for this IP address
 echo "{$break}Demonstrating StopForumSpam DNSBL query: $break";
 echo "getDnsResponse(): {$sfs->getDnsResponse()} $break";

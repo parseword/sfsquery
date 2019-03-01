@@ -3,7 +3,7 @@
 /*
  * SFSQuery: A PHP client to query the StopForumSpam API
  *
- * Copyright 2018 Shaun Cummiskey, <shaun@shaunc.com> <https://shaunc.com/>
+ * Copyright 2018, 2019 Shaun Cummiskey <shaun@shaunc.com> <https://shaunc.com/>
  * <https://github.com/parseword/sfsquery/>
  *
  * The author is not affiliated with the StopForumSpam project. Any use of
@@ -25,32 +25,125 @@
 
 namespace parseword\SFSQuery;
 
-//TCP connect timeout (in seconds) to use. Applies to web API only.
-define('SFS_NET_TIMEOUT', 3);
-
-//User-Agent string to present to the StopForumSpam API
-define('SFS_USER_AGENT',
-        'SFSQuery/1.1.0 (+https://github.com/parseword/sfsquery/)');
-
-//Components of the API URI. You should leave this alone unless you need to
-//connect to a specific regional server.
-define('SFS_API',
-        ['proto' => 'http://', 'host' => 'api.stopforumspam.org', 'uri' => '/api?json&ip=']
-);
-
 class SFSQuery
 {
 
+    /**
+     * The TCP connect timeout (in seconds) to use. Applies to web API only.
+     */
+    const SFS_NET_TIMEOUT = 3;
+
+    /**
+     * The User-Agent string to present to the StopForumSpam API.
+     */
+    const SFS_USER_AGENT = 'SFSQuery/2.0.0 (+https://github.com/parseword/sfsquery/)';
+
+    /**
+     * Components of the API URI. You should leave this alone unless you need to
+     * connect to a specific regional server.
+     */
+    const SFS_API = [
+        'proto' => 'http://', 'host'  => 'api.stopforumspam.org',
+        'uri'   => '/api?json&ip='
+    ];
+
+    /**
+     * A label representing the web-based API query method.
+     */
+    const QUERYMETHOD_WEB = 0;
+
+    /**
+     * A label representing the DNSBL query method.
+     */
+    const QUERYMETHOD_DNS = 1;
+
+    /**
+     * The method to use when querying StopForumSpam. Must be set to either
+     * self::QUERYMETHOD_WEB or self::QUERYMETHOD_DNS. Defaults to using the
+     * web-based API.
+     *
+     * @var int
+     */
+    private $queryMethod = self::QUERYMETHOD_WEB;
+
+    /**
+     * Whether or not this object has performed a query. Used to avoid running
+     * duplicate queries.
+     *
+     * @var bool
+     */
     private $queried = false;
+
+    /**
+     * The IP address to test against the StopForumSpam database.
+     *
+     * @var string
+     */
     private $ip = null;
+
+    /**
+     * The JSON response from StopForumSpam's server.
+     *
+     * @var string
+     */
     private $apiResponse = null;
+
+    /**
+     * Whether or not the tested IP appears in the StopForumSpam database.
+     *
+     * @var bool
+     */
     private $appears = false;
+
+    /**
+     * The spammer confidence level calculated by StopForumSpam.
+     *
+     * @var float
+     */
     private $confidence = 0.00;
+
+    /**
+     * The country code corresponding to the tested IP.
+     *
+     * @var string
+     */
     private $country = null;
+
+    /**
+     * When queryMethod is set to SFSQuery::QUERYMETHOD_DNS, this will contain
+     * the response from StopForumSpam's DNSBL server.
+     *
+     * @var string
+     */
     private $dnsResponse = null;
+
+    /**
+     * The number of times the tested IP appears in the StopForumSpam database.
+     *
+     * @var int
+     */
     private $frequency = 0;
+
+    /**
+     * The epoch of the last time this IP was reported to StopForumSpam.
+     *
+     * @var int
+     */
     private $lastSeen = 0;
+
+    /**
+     * When available, the autonomous system number corresponding to the tested
+     * IP address.
+     *
+     * @var int
+     */
     private $asn = 0;
+
+    /**
+     * An error message, if applicable.
+     *
+     * @var string
+     */
     private $error = null;
 
     /**
@@ -285,6 +378,23 @@ class SFSQuery
         $this->lastSeen = $lastSeen;
     }
 
+    /**
+     * Set the query method to use. Must be set to either self::QUERYMETHOD_WEB
+     * or self::QUERYMETHOD_DNS.
+     *
+     * @param int $queryMethod
+     * @return bool If false, the supplied $queryMethod value was invalid
+     */
+    public function setQueryMethod(int $queryMethod): bool {
+        if (!in_array($queryMethod,
+                        [self::QUERYMETHOD_WEB, self::QUERYMETHOD_DNS])) {
+            $this->setError("Invalid query method; use a QUERYMETHOD constant");
+            return false;
+        }
+        $this->queryMethod = $queryMethod;
+        return true;
+    }
+
     /*
      * A wrapper to determine whether we want to query the web API or the
      * DNSBL, and then perform the appropriate query. If this instance has
@@ -301,14 +411,12 @@ class SFSQuery
             return true;
         }
 
-        //SFSQuery uses the web API by default. To query the DNSBL instead,
-        //define a constant named SFS_QUERY_METHOD as the string literal 'DNS'.
-        if (defined('SFS_QUERY_METHOD') && SFS_QUERY_METHOD == 'DNS') {
+        //Determine which query method to use
+        if ($this->queryMethod === self::QUERYMETHOD_DNS) {
             return $this->dnsQuery();
         }
-        else {
-            return $this->apiQuery();
-        }
+
+        return $this->apiQuery();
     }
 
     /**
@@ -339,8 +447,8 @@ class SFSQuery
 
         //Use file_get_contents if it's available
         if (ini_get('allow_url_fopen')) {
-            ini_set('user_agent', SFS_USER_AGENT);
-            if (!$response = @file_get_contents(join(SFS_API) . $this->getIp())) {
+            ini_set('user_agent', self::SFS_USER_AGENT);
+            if (!$response = @file_get_contents(join(self::SFS_API) . $this->getIp())) {
                 $this->setError(error_get_last()['message']);
                 return false;
             }
@@ -348,10 +456,10 @@ class SFSQuery
 
         //Otherwise use curl if it's available
         else if (function_exists('curl_init')) {
-            $ch = curl_init(join(SFS_API) . $this->getIp());
-            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, SFS_NET_TIMEOUT);
-            curl_setopt($ch, CURLOPT_TIMEOUT, SFS_NET_TIMEOUT);
-            curl_setopt($ch, CURLOPT_USERAGENT, SFS_USER_AGENT);
+            $ch = curl_init(join(self::SFS_API) . $this->getIp());
+            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, self::SFS_NET_TIMEOUT);
+            curl_setopt($ch, CURLOPT_TIMEOUT, self::SFS_NET_TIMEOUT);
+            curl_setopt($ch, CURLOPT_USERAGENT, self::SFS_USER_AGENT);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
             if (!$response = @curl_exec($ch)) {
                 $this->setError(curl_error($ch));
@@ -361,12 +469,13 @@ class SFSQuery
         }
 
         //As a last resort, try to do the request manually (plain HTTP only)
-        else if (function_exists('fsockopen') && (strpos(SFS_API['proto'], 's') === false)) {
-            ini_set('default_socket_timeout', SFS_NET_TIMEOUT);
-            if ($sock = @fsockopen(SFS_API['host'], 80)) {
-                $request = 'GET ' . SFS_API['uri'] . $this->ip . " HTTP/1.0\r\n"
-                        . 'Host: ' . SFS_API['host'] . "\r\n"
-                        . 'User-Agent: ' . SFS_USER_AGENT . "\r\n"
+        else if (function_exists('fsockopen') && (strpos(self::SFS_API['proto'],
+                        's') === false)) {
+            ini_set('default_socket_timeout', self::SFS_NET_TIMEOUT);
+            if ($sock = @fsockopen(self::SFS_API['host'], 80)) {
+                $request = 'GET ' . self::SFS_API['uri'] . $this->ip . " HTTP/1.0\r\n"
+                        . 'Host: ' . self::SFS_API['host'] . "\r\n"
+                        . 'User-Agent: ' . self::SFS_USER_AGENT . "\r\n"
                         . "Accept: text/txt,text/html;q=0.9,*/*;q=0.8\r\n"
                         . "Connection: close\r\n\r\n";
                 fwrite($sock, $request);

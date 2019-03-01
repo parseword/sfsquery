@@ -8,7 +8,8 @@ database in real time.
 ### Usage
 
 SFSQuery is platform-agnostic and can be used with any project. 
-Simply `require()` the class file or place it where your autoloader can find it.
+Simply `require()` the class file or place it where your autoloader can find it; 
+Composer installation is supported.
 
 The simplest implementation uses an anonymous object to check whether or not an 
 IP meets one of several criteria. For example, you might want to reject an action 
@@ -91,6 +92,9 @@ accurate. (Web API only.)
 
 There are several additional methods available:
 
+* `setQueryMethod()` - Switch from querying the web API (default) to the DNSBL, 
+see next section.
+
 * `getApiResponse()` - If an API query succeeds, this will contain the JSON reply 
 from StopForumSpam.
 
@@ -124,16 +128,16 @@ The trade-off is that StopForumSpam's DNSBL doesn't provide information about
 the target IP's ASN or country code. The `getAsn()` and `getCountry()` methods 
 aren't compatible with DNSBL mode and will return 0 and null, respectively.
 
-To make `SFSQuery` use the DNSBL instead of the web API, somewhere in your 
-calling code you need to define a constant named `SFS_QUERY_METHOD` and set 
-its value to the string literal `DNS`:
+To make `SFSQuery` use the DNSBL instead of the web API, you *must* instantiate 
+an SFSQuery object and call `setQueryMethod(SFSQuery::QUERYMETHOD_DNS);`
 
 ```php
 <?php
-define('SFS_QUERY_METHOD', 'DNS'); // <-- This turns on DNSBL mode
 use parseword\SFSQuery\SFSQuery;
 
 $sfs = new SFSQuery($_SERVER['REMOTE_ADDR']);
+$sfs->setQueryMethod(SFSQuery::QUERYMETHOD_DNS);
+
 if ($sfs->wasReportedInPastDays(7) && $sfs->getConfidence() > 50) {
     //Reject the comment
     exit;
